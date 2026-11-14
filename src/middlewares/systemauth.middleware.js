@@ -1,0 +1,59 @@
+import jwt from "jsonwebtoken";
+import config from "../config/config.js";
+import userModel from "../models/user.model.js";
+import blacklistModel from "../models/blacklist.model.js";
+
+export const systemUserAuthMiddlware = async (req, res, next) => {
+  const { token } = req.cookies;
+
+  if (!token) {
+    return res.status(401).json({
+      message: "Unauthorized",
+    });
+  }
+
+  const blacklistedToken = await blacklistModel.findOne({ token });
+  if (blacklistedToken) {
+    return res.status(400).json({
+      message: "Token expired",
+    });
+  }
+
+  try {
+    const decoded = jwt.verify(token, config.jwtSKey);
+
+    const systemUser = await userModel
+      .findById(decoded.userId)
+      .select("+systemUser");
+
+    if (!systemUser) {
+      return res.status(401).json({
+        message: "User not found",
+      });
+    }
+
+    if (systemUser.systemUser === true) {
+      req.user = systemUser;
+      return next();
+    }
+
+    req.user = null;
+
+    return res.status(403).json({
+      message: "Forbidden: System user access required",
+    });
+  } catch (error) {
+    if (
+      error.name === "JsonWebTokenError" ||
+      error.name === "TokenExpiredError"
+    ) {
+      return res.status(401).json({
+        message: "Invalid or expired token",
+      });
+    }
+
+    return res.status(500).json({
+      message: "Internal server error",
+    });
+  }
+};
